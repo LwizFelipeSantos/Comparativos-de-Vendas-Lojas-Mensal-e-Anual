@@ -1,0 +1,6 @@
+{
+  "name": "Dashboard Zona Franca",
+  "description": "App de análise de vendas com KPIs, gráficos e exportação em PDF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
