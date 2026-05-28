@@ -19,8 +19,8 @@ export interface SalesData {
 
 export type FilterState = {
   cidade: string | null;
-  loja: string | null;
+  loja: string[];
   setor: string | null;
   ano: number | null;
-  mes: string | number | null;
+  mes: string[];
 };

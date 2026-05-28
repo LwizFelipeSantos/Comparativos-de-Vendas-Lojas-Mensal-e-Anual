@@ -1,0 +1,21 @@
+{
+  "entities": {
+    "SalesData": {
+      "title": "SalesData",
+      "description": "Information about sales data for either monthly or annual comparison.",
+      "type": "object",
+      "properties": {
+        "period": { "type": "string" },
+        "data": { "type": "string", "description": "JSON stringified sales data due to varying length and dynamic keys." },
+        "type": { "type": "string", "enum": ["mensal", "anual"] }
+      },
+      "required": ["period", "data", "type"]
+    }
+  },
+  "firestore": {
+    "sales/{docId}": {
+      "schema": "SalesData",
+      "description": "Stores current sales data. 'mensal' or 'anual' acts as docId."
+    }
+  }
+}

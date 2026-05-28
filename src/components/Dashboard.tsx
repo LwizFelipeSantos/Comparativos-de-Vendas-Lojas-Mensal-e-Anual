@@ -12,12 +12,12 @@ import {
   Pie,
   Cell,
   LabelList,
+  LineChart,
+  Line,
 } from "recharts";
 import { FilterState, SalesData } from "../types";
 import { cn, formatCurrency, formatPercent } from "../lib/utils";
-import { TrendingUp, TrendingDown, DollarSign, MapPin, Building, Download, Info, X, Sun, Moon, Minus, Loader2 } from "lucide-react";
-import { toPng } from "html-to-image";
-import { jsPDF } from "jspdf";
+import { TrendingUp, TrendingDown, DollarSign, MapPin, Building, Filter, Info, X, Sun, Moon, Minus, ChevronDown, Check } from "lucide-react";
 
 const CATEGORY_COLORS = ["#8B5CF6", "#E7AEA0", "#10B981", "#F59E0B", "#722F37", "#06b6d4", "#14b8a6", "#a855f7"];
 
@@ -34,20 +34,23 @@ const getCategoryColor = (name: string, isDark: boolean) => {
 interface DashboardProps {
   data: SalesData[];
   period?: string;
-  onReset: () => void;
+  onReset?: () => void;
   type: 'mensal' | 'anual';
   title: string;
 }
 
 export function Dashboard({ data, period, onReset, type, title }: DashboardProps) {
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [lineChartMode, setLineChartMode] = useState<'faturamento' | 'crescimento'>('faturamento');
+  const [isFilterVisible, setIsFilterVisible] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<'loja' | 'mes' | null>(null);
   
   const [filter, setFilter] = useState<FilterState>({
     cidade: null,
-    loja: null,
+    loja: [],
     setor: null,
     ano: null,
-    mes: null,
+    mes: [],
   });
 
   const theme = isDarkMode ? {
@@ -71,7 +74,7 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
     chartCursor: "#1e293b",
     positive: "#22C55E",
     negative: "#EF4444",
-    neutral: "#595F6B"
+    neutral: "#6B7280"
   } : {
     bgApp: "bg-[#F5F6FA] text-slate-900",
     bgCard: "bg-white border-gray-200 shadow-sm",
@@ -93,12 +96,32 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
     chartCursor: "#F3F4F6",
     positive: "#22C55E",
     negative: "#EF4444",
-    neutral: "#595F6B"
+    neutral: "#6B7280"
   };
 
   const toggleFilter = (key: keyof FilterState, value: string | number) => {
     if (!value) return;
-    setFilter(prev => ({ ...prev, [key]: prev[key] === value ? null : value }));
+    setFilter(prev => {
+      if (key === 'loja' || key === 'mes') {
+        const currentArr = prev[key] as string[];
+        const strVal = String(value);
+        if (currentArr.includes(strVal)) {
+          return { ...prev, [key]: currentArr.filter(v => v !== strVal) };
+        } else {
+          return { ...prev, [key]: [...currentArr, strVal] };
+        }
+      } else {
+        return { ...prev, [key]: prev[key] === value ? null : value };
+      }
+    });
+  };
+
+  const selectAll = (key: 'loja' | 'mes', values: (string | number)[]) => {
+    setFilter(prev => ({ ...prev, [key]: values.map(String) }));
+  };
+
+  const deselectAll = (key: 'loja' | 'mes') => {
+    setFilter(prev => ({ ...prev, [key]: [] }));
   };
 
   // Extract unique values for filters
@@ -106,71 +129,67 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
   const lojas = useMemo(() => Array.from(new Set(data.map((d) => d.loja))).sort(), [data]);
   const setores = useMemo(() => Array.from(new Set(data.map((d) => d.setor))).sort(), [data]);
   const anos = useMemo(() => Array.from(new Set(data.map((d) => d.ano))).sort((a,b)=>b-a), [data]);
+  
+  const monthOrder = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
   const meses = useMemo(() => Array.from(new Set(data.filter(d => d.mes).map((d) => d.mes as string | number))).sort((a,b)=> {
-    // Basic sorting, considering they could be string or numbers
+    const aStr = String(a).toLowerCase();
+    const bStr = String(b).toLowerCase();
+    const aIndex = monthOrder.indexOf(aStr);
+    const bIndex = monthOrder.indexOf(bStr);
+    if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+    if (aIndex !== -1) return -1;
+    if (bIndex !== -1) return 1;
     if (typeof a === 'number' && typeof b === 'number') return a - b;
-    return String(a).localeCompare(String(b));
+    return aStr.localeCompare(bStr);
   }), [data]);
-
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
-
-  // Handle PDF Export
-  const exportPDF = () => {
-    const dashboardStats = document.getElementById("dashboard-content");
-    if (!dashboardStats) {
-      console.error("Conteúdo do dashboard não encontrado.");
-      return;
-    }
-
-    setIsGeneratingPDF(true);
-
-    setTimeout(async () => {
-      try {
-        const imgData = await toPng(dashboardStats, {
-          cacheBust: true,
-          backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc',
-          pixelRatio: 2,
-        });
-
-        const pdf = new jsPDF("p", "mm", "a4");
-        
-        const imgProps = pdf.getImageProperties(imgData);
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-        
-        let heightLeft = pdfHeight;
-        let position = 0;
-        const pageHeight = pdf.internal.pageSize.getHeight();
-
-        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
-        heightLeft -= pageHeight;
-
-        while (heightLeft > 0) {
-          position -= pageHeight;
-          pdf.addPage();
-          pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
-          heightLeft -= pageHeight;
-        }
-
-        pdf.save("dashboard-vendas.pdf");
-      } catch (e: any) {
-        console.error("Erro ao gerar PDF", e);
-      } finally {
-        setIsGeneratingPDF(false);
-      }
-    }, 150);
-  };
 
   // Base Data = Ignoring Year filter for YoY calculations
   const baseData = useMemo(() => {
     return data.filter((d) => {
       if (filter.cidade && d.cidade !== filter.cidade) return false;
-      if (filter.loja && d.loja !== filter.loja) return false;
+      if (filter.loja.length > 0 && !filter.loja.includes(d.loja)) return false;
       if (filter.setor && d.setor !== filter.setor) return false;
-      if (filter.mes && d.mes !== filter.mes) return false;
+      if (filter.mes.length > 0 && (!d.mes || !filter.mes.includes(String(d.mes)))) return false;
       return true;
     });
   }, [data, filter.cidade, filter.loja, filter.setor, filter.mes]);
+
+  const baseDataIgnoringMonth = useMemo(() => {
+    return data.filter((d) => {
+      if (filter.cidade && d.cidade !== filter.cidade) return false;
+      if (filter.loja.length > 0 && !filter.loja.includes(d.loja)) return false;
+      if (filter.setor && d.setor !== filter.setor) return false;
+      return true;
+    });
+  }, [data, filter.cidade, filter.loja, filter.setor]);
+
+  const yoyMensal = useMemo(() => {
+    const map = new Map<string, { v25: number; v26: number }>();
+    if (type !== 'anual') return [];
+    
+    baseDataIgnoringMonth.forEach(d => {
+      if (!d.mes) return;
+      const mesStr = String(d.mes);
+      if(!map.has(mesStr)) map.set(mesStr, { v25: 0, v26: 0 });
+      if(d.ano === 2025) map.get(mesStr)!.v25 += d.valor;
+      if(d.ano === 2026) map.get(mesStr)!.v26 += d.valor;
+    });
+    
+    return Array.from(map.entries()).map(([name, vals]) => {
+      const growth = vals.v25 === 0 ? (vals.v26 > 0 ? 1 : 0) : (vals.v26 - vals.v25) / vals.v25;
+      const diff = vals.v26 - vals.v25;
+      return { 
+        name, 
+        ...vals, 
+        growth, 
+        diff,
+        order: isNaN(Number(name)) ? name : Number(name) 
+      };
+    }).sort((a, b) => {
+      if (typeof a.order === 'number' && typeof b.order === 'number') return a.order - b.order;
+      return String(a.order).localeCompare(String(b.order));
+    });
+  }, [baseDataIgnoringMonth, type]);
 
   // Current View Data = includes year filter
   const currentData = useMemo(() => {
@@ -291,7 +310,7 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
           <p className="font-bold mb-2 text-sm">{label}</p>
           <p className={theme.textMuted}>Vendas {latestYear}: <span className="font-bold" style={{color: theme.bar2026}}>{formatCurrency(data.v26 !== undefined ? data.v26 : data.value)}</span></p>
           {data.v25 !== undefined && (
-            <p className={theme.textMuted}>Vendas {latestYear - 1}: <span className="font-bold" style={{color: '#595F6B'}}>{formatCurrency(data.v25)}</span></p>
+            <p className={theme.textMuted}>Vendas {latestYear - 1}: <span className="font-bold" style={{color: theme.neutral}}>{formatCurrency(data.v25)}</span></p>
           )}
           {data.share !== undefined && (
              <p className={theme.textMuted}>Participação: <span className="font-bold">{formatPercent(data.share)}</span></p>
@@ -329,26 +348,29 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
           >
             {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
-           <button
-            onClick={onReset}
-            className={`px-4 py-2 border rounded-lg shadow-sm font-medium transition-colors ${theme.btnSecondary}`}
-          >
-            Novo Arquivo
-          </button>
+          {onReset && (
+            <button
+              onClick={onReset}
+              className={`px-4 py-2 border rounded-lg shadow-sm font-medium transition-colors ${theme.btnSecondary}`}
+            >
+              Novo Arquivo
+            </button>
+          )}
           <button
-            onClick={exportPDF}
-            disabled={isGeneratingPDF}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-sm font-bold uppercase transition-colors ${theme.btnPrimary} ${isGeneratingPDF ? 'opacity-50 cursor-not-allowed' : ''}`}
+            onClick={() => setIsFilterVisible(!isFilterVisible)}
+            className={`flex items-center gap-2 px-4 py-2 border rounded-lg shadow-sm font-bold uppercase transition-colors ${theme.btnSecondary} ${isFilterVisible ? (isDarkMode ? '!bg-slate-700' : '!bg-slate-200') : ''}`}
+            title="Alternar Filtros"
           >
-            {isGeneratingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            {isGeneratingPDF ? 'Gerando...' : 'Exportar PDF'}
+            <Filter className="w-4 h-4" />
+            <span className="hidden sm:inline">Filtros</span>
           </button>
         </div>
       </div>
 
       {/* Filters (Applies globally to base dataset) */}
-      <div className={`max-w-7xl mx-auto mb-8 p-4 rounded-xl border shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-${meses.length > 0 ? '5' : '4'} gap-4 ${theme.bgFilter} transition-colors`}>
-         <div>
+      {isFilterVisible && (
+        <div className={`max-w-7xl mx-auto mb-8 p-4 rounded-xl border shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-${meses.length > 0 ? '5' : '4'} gap-4 ${theme.bgFilter} transition-colors`}>
+          <div>
             <label className={`block text-xs font-bold ${theme.textMuted} uppercase tracking-wider mb-2`}>Cidade</label>
             <select
               title="Cidade"
@@ -361,18 +383,46 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
               {cidades.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
          </div>
-         <div>
-            <label className={`block text-xs font-bold ${theme.textMuted} uppercase tracking-wider mb-2`}>Loja</label>
-            <select
-              title="Loja"
-              className={`w-full border rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none ${theme.bgApp} ${theme.textMain}`}
+         <div className="relative">
+            <div className="flex justify-between items-center mb-2">
+              <label className={`block text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Loja</label>
+            </div>
+            <button
+              onClick={() => setOpenDropdown(openDropdown === 'loja' ? null : 'loja')}
+              className={`w-full border rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none flex justify-between items-center ${theme.bgApp} ${theme.textMain}`}
               style={{ borderColor: theme.gridLine }}
-              value={filter.loja || ""}
-              onChange={(e) => setFilter(f => ({ ...f, loja: e.target.value || null }))}
             >
-              <option value="">Todas</option>
-              {lojas.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+              <span className="truncate">{filter.loja.length > 0 ? `${filter.loja.length} selecionada(s)` : 'Todas'}</span>
+              <ChevronDown size={14} className={`transition-transform ${openDropdown === 'loja' ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {openDropdown === 'loja' && (
+              <div className={`absolute z-10 w-full mt-1 border rounded-md shadow-lg ${theme.bgApp} ${theme.textMain} max-h-60 overflow-y-auto`} style={{ borderColor: theme.gridLine }}>
+                <div className={`p-2 border-b flex justify-between sticky top-0 bg-opacity-95 ${theme.bgApp}`} style={{ borderColor: theme.gridLine, backdropFilter: 'blur(4px)' }}>
+                  <button onClick={() => selectAll('loja', lojas)} className={`text-[10px] uppercase font-bold text-blue-500 hover:text-blue-600`}>Todos</button>
+                  <button onClick={() => deselectAll('loja')} className={`text-[10px] uppercase font-bold text-red-500 hover:text-red-600`}>Nenhum</button>
+                </div>
+                <div className="p-1">
+                  {lojas.map(c => {
+                    const isSelected = filter.loja.includes(String(c));
+                    return (
+                      <label key={c} className={`flex items-center gap-2 cursor-pointer p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded ${isSelected ? 'bg-black/5 dark:bg-white/5' : ''}`}>
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-gray-400'}`}>
+                          {isSelected && <Check size={10} className="text-white dropdown-check" strokeWidth={3} />}
+                        </div>
+                        <input
+                          type="checkbox"
+                          className="hidden"
+                          checked={isSelected}
+                          onChange={() => toggleFilter('loja', c)}
+                        />
+                        <span className="text-sm truncate select-none">{c}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
          </div>
          <div>
             <label className={`block text-xs font-bold ${theme.textMuted} uppercase tracking-wider mb-2`}>Setor</label>
@@ -388,18 +438,46 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
             </select>
          </div>
          {meses.length > 0 && (
-           <div>
-              <label className={`block text-xs font-bold ${theme.textMuted} uppercase tracking-wider mb-2`}>Mês</label>
-              <select
-                title="Mês"
-                className={`w-full border rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none ${theme.bgApp} ${theme.textMain}`}
+           <div className="relative">
+              <div className="flex justify-between items-center mb-2">
+                <label className={`block text-xs font-bold ${theme.textMuted} uppercase tracking-wider`}>Mês</label>
+              </div>
+              <button
+                onClick={() => setOpenDropdown(openDropdown === 'mes' ? null : 'mes')}
+                className={`w-full border rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none flex justify-between items-center ${theme.bgApp} ${theme.textMain}`}
                 style={{ borderColor: theme.gridLine }}
-                value={filter.mes || ""}
-                onChange={(e) => setFilter(f => ({ ...f, mes: e.target.value || null }))}
               >
-                <option value="">Todos</option>
-                {meses.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
+                <span className="truncate">{filter.mes.length > 0 ? `${filter.mes.length} selecionado(s)` : 'Todos'}</span>
+                <ChevronDown size={14} className={`transition-transform ${openDropdown === 'mes' ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {openDropdown === 'mes' && (
+                <div className={`absolute z-10 w-full mt-1 border rounded-md shadow-lg ${theme.bgApp} ${theme.textMain} max-h-60 overflow-y-auto`} style={{ borderColor: theme.gridLine }}>
+                  <div className={`p-2 border-b flex justify-between sticky top-0 bg-opacity-95 ${theme.bgApp}`} style={{ borderColor: theme.gridLine, backdropFilter: 'blur(4px)' }}>
+                    <button onClick={() => selectAll('mes', meses.map(String))} className={`text-[10px] uppercase font-bold text-blue-500 hover:text-blue-600`}>Todos</button>
+                    <button onClick={() => deselectAll('mes')} className={`text-[10px] uppercase font-bold text-red-500 hover:text-red-600`}>Nenhum</button>
+                  </div>
+                  <div className="p-1">
+                    {meses.map(m => {
+                      const isSelected = filter.mes.includes(String(m));
+                      return (
+                        <label key={m} className={`flex items-center gap-2 cursor-pointer p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded ${isSelected ? 'bg-black/5 dark:bg-white/5' : ''}`}>
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-gray-400'}`}>
+                            {isSelected && <Check size={10} className="text-white" strokeWidth={3} />}
+                          </div>
+                          <input
+                            type="checkbox"
+                            className="hidden"
+                            checked={isSelected}
+                            onChange={() => toggleFilter('mes', String(m))}
+                          />
+                          <span className="text-sm truncate select-none">{m}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
            </div>
          )}
          <div>
@@ -416,9 +494,10 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
             </select>
          </div>
       </div>
+      )}
 
       {/* Active Filters */}
-      {Object.values(filter).some(val => val !== null) && (
+      {Object.values(filter).some(val => val !== null && (!Array.isArray(val) || val.length > 0)) && (
         <div className={`max-w-7xl mx-auto mb-6 flex flex-wrap gap-2 items-center text-sm p-3 rounded-lg border ${theme.bgFilter}`}>
           <span className={`${theme.textMuted} font-bold uppercase text-[10px] mr-2`}>Filtros Ativos:</span>
           {filter.cidade && (
@@ -427,10 +506,10 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
               <button onClick={() => toggleFilter('cidade', filter.cidade!)} className={`hover:opacity-100 opacity-60 transition-colors`} title="Remover filtro"><X size={14} /></button>
             </span>
           )}
-          {filter.loja && (
+          {filter.loja.length > 0 && (
              <span className={`border px-3 py-1 rounded-full flex items-center gap-2 text-xs font-semibold ${isDarkMode ? 'bg-purple-900/50 text-purple-200 border-purple-800' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>
-              <span className="opacity-70 font-normal">Loja:</span> {filter.loja}
-              <button onClick={() => toggleFilter('loja', filter.loja!)} className={`hover:opacity-100 opacity-60 transition-colors`} title="Remover filtro"><X size={14} /></button>
+              <span className="opacity-70 font-normal">Loja:</span> {filter.loja.length > 2 ? `${filter.loja.length} selecionadas` : filter.loja.join(', ')}
+              <button onClick={() => deselectAll('loja')} className={`hover:opacity-100 opacity-60 transition-colors`} title="Remover filtro"><X size={14} /></button>
             </span>
           )}
           {filter.setor && (
@@ -445,13 +524,13 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
               <button onClick={() => toggleFilter('ano', filter.ano!)} className={`hover:opacity-100 opacity-60 transition-colors`} title="Remover filtro"><X size={14} /></button>
             </span>
           )}
-          {filter.mes && (
+          {filter.mes.length > 0 && (
              <span className={`border px-3 py-1 rounded-full flex items-center gap-2 text-xs font-semibold ${isDarkMode ? 'bg-indigo-900/50 text-indigo-200 border-indigo-800' : 'bg-indigo-50 text-indigo-700 border-indigo-200'}`}>
-              <span className="opacity-70 font-normal">Mês:</span> {filter.mes}
-              <button onClick={() => toggleFilter('mes', filter.mes!)} className={`hover:opacity-100 opacity-60 transition-colors`} title="Remover filtro"><X size={14} /></button>
+              <span className="opacity-70 font-normal">Mês:</span> {filter.mes.length > 2 ? `${filter.mes.length} meses` : filter.mes.join(', ')}
+              <button onClick={() => deselectAll('mes')} className={`hover:opacity-100 opacity-60 transition-colors`} title="Remover filtro"><X size={14} /></button>
             </span>
           )}
-          <button onClick={() => setFilter({ cidade: null, loja: null, setor: null, ano: null, mes: null })} className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 uppercase font-bold ml-2">
+          <button onClick={() => setFilter({ cidade: null, loja: [], setor: null, ano: null, mes: [] })} className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 uppercase font-bold ml-2">
             Limpar Todos
           </button>
         </div>
@@ -551,6 +630,64 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
             </div>
          </div>
 
+        {/* Análise Temporal (Anual) */}
+        {type === 'anual' && (
+          <div className="grid grid-cols-1 gap-6">
+            <ChartCard title="Evolução Mensal (2025 vs 2026)" theme={theme}>
+              <div className="flex gap-2 mb-4 justify-end border-b pb-2" style={{ borderColor: theme.gridLine }}>
+                <button 
+                  onClick={() => setLineChartMode('faturamento')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors ${lineChartMode === 'faturamento' ? 'bg-blue-500 text-white' : theme.textMuted}`}
+                >
+                  Faturamento
+                </button>
+                <button 
+                  onClick={() => setLineChartMode('crescimento')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors ${lineChartMode === 'crescimento' ? 'bg-emerald-500 text-white' : theme.textMuted}`}
+                >
+                  Crescimento (%)
+                </button>
+              </div>
+              <ResponsiveContainer width="100%" height={300}>
+                {lineChartMode === 'faturamento' ? (
+                  <LineChart data={yoyMensal} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.gridLine} />
+                    <XAxis dataKey="name" tick={{fill: theme.chartTick, fontSize: 10, fontWeight: "600"}} axisLine={false} tickLine={false} tickFormatter={(val) => String(val).toUpperCase()} />
+                    <YAxis tickFormatter={(val) => `R$ ${val/1000}k`} tick={{fill: theme.chartTick, fontSize: 10, fontWeight: "600"}} axisLine={false} tickLine={false} />
+                    <Tooltip cursor={{fill: theme.chartCursor}} content={<CustomTooltip />} />
+                    <Legend wrapperStyle={{paddingTop: '20px', fontSize: '12px'}} />
+                    <Line type="monotone" dataKey="v25" name="2025" stroke={theme.bar2025} strokeWidth={3} dot={{r: 4}} activeDot={{r: 6}} />
+                    <Line type="monotone" dataKey="v26" name="2026" stroke={theme.bar2026} strokeWidth={3} dot={{r: 4}} activeDot={{r: 6}} />
+                  </LineChart>
+                ) : (
+                  <LineChart data={yoyMensal} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.gridLine} />
+                    <XAxis dataKey="name" tick={{fill: theme.chartTick, fontSize: 10, fontWeight: "600"}} axisLine={false} tickLine={false} tickFormatter={(val) => String(val).toUpperCase()} />
+                    <YAxis tickFormatter={(val) => `${(val*100).toFixed(0)}%`} tick={{fill: theme.chartTick, fontSize: 10, fontWeight: "600"}} axisLine={false} tickLine={false} />
+                    <Tooltip cursor={{fill: theme.chartCursor}} content={<CustomTooltip hideDifference={true} />} />
+                    <Legend wrapperStyle={{paddingTop: '20px', fontSize: '12px'}} />
+                    <Line type="monotone" dataKey="growth" name="Crescimento (YoY)" stroke={theme.positive} strokeWidth={3} dot={{r: 4}} activeDot={{r: 6}}>
+                      <LabelList
+                        dataKey="growth"
+                        content={(props: any) => {
+                          const { x, y, value } = props;
+                          const color = value > 0 ? theme.positive : value < 0 ? theme.negative : theme.neutral;
+                          const formatted = formatPercent(value);
+                          return (
+                            <text x={x} y={y} dy={-10} fill={color} fontSize={10} fontWeight="bold" textAnchor="middle">
+                              {formatted}
+                            </text>
+                          );
+                        }}
+                      />
+                    </Line>
+                  </LineChart>
+                )}
+              </ResponsiveContainer>
+            </ChartCard>
+          </div>
+        )}
+
         {/* Charts Row 1: Visão Regional */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <ChartCard title={`Participação por Cidade (${latestYear})`} theme={theme}>
@@ -601,7 +738,21 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
                   {yoyCidade.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.growth > 0 ? theme.positive : entry.growth < 0 ? theme.negative : theme.neutral} />
                   ))}
-                  <LabelList dataKey="growth" position="top" formatter={(val: number) => formatPercent(val)} fill={theme.chartTick} fontSize={10} />
+                  <LabelList
+                    dataKey="growth"
+                    content={(props: any) => {
+                      const { x, y, width, height, value } = props;
+                      const color = value > 0 ? theme.positive : value < 0 ? theme.negative : theme.neutral;
+                      const formatted = formatPercent(value);
+                      const xPos = x + (width || 0) / 2;
+                      const yPos = value >= 0 ? y - 5 : y + height + 12;
+                      return (
+                        <text x={xPos} y={yPos} fill={color} fontSize={10} fontWeight="bold" textAnchor="middle">
+                          {formatted}
+                        </text>
+                      );
+                    }}
+                  />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -641,7 +792,22 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
                    {yoySetor.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.growth > 0 ? theme.positive : entry.growth < 0 ? theme.negative : theme.neutral} />
                   ))}
-                  <LabelList dataKey="growth" position="right" formatter={(val: number) => formatPercent(val)} fill={theme.chartTick} fontSize={10} />
+                  <LabelList
+                    dataKey="growth"
+                    content={(props: any) => {
+                      const { x, y, width, height, value } = props;
+                      const color = value > 0 ? theme.positive : value < 0 ? theme.negative : theme.neutral;
+                      const formatted = formatPercent(value);
+                      const tip = x + (width || 0);
+                      const finalX = value >= 0 ? tip + 5 : tip - 5;
+                      const align = value >= 0 ? "start" : "end";
+                      return (
+                        <text x={finalX} y={y + (height || 0) / 2} dy={3} fill={color} fontSize={10} fontWeight="bold" textAnchor={align}>
+                          {formatted}
+                        </text>
+                      );
+                    }}
+                  />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -706,7 +872,22 @@ export function Dashboard({ data, period, onReset, type, title }: DashboardProps
                       {yoyLoja.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.growth > 0 ? theme.positive : entry.growth < 0 ? theme.negative : theme.neutral} />
                       ))}
-                      <LabelList dataKey="growth" position="right" formatter={(val: number) => formatPercent(val)} fill={theme.chartTick} fontSize={10} />
+                      <LabelList
+                        dataKey="growth"
+                        content={(props: any) => {
+                          const { x, y, width, height, value } = props;
+                          const color = value > 0 ? theme.positive : value < 0 ? theme.negative : theme.neutral;
+                          const formatted = formatPercent(value);
+                          const tip = x + (width || 0);
+                          const finalX = value >= 0 ? tip + 5 : tip - 5;
+                          const align = value >= 0 ? "start" : "end";
+                          return (
+                            <text x={finalX} y={y + (height || 0) / 2} dy={3} fill={color} fontSize={10} fontWeight="bold" textAnchor={align}>
+                              {formatted}
+                            </text>
+                          );
+                        }}
+                      />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
